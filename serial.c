@@ -11,11 +11,17 @@ int main(int argc, char *argv[]) {
 		return -1;
 	} 
 
-	csr_matrix* matrix = read_mm_csr(argv[1]);
+	//csr_matrix* matrix = read_mm_csr(argv[1]);
 
-	print_csr_matrix(*matrix);
+	//print_csr_matrix(*matrix);
 	
-	print_csr_matrix_market(*matrix);
+	//print_csr_matrix_market(*matrix);
+
+	ellpack_matrix* matrix = read_mm_ellpack(argv[1]);
+
+	print_ellpack_matrix(*matrix);
+
+	print_ellpack_matrix_market(*matrix);
 
 	return 0;
 }
