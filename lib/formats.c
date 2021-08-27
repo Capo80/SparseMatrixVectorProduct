@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 
 #include "../include/formats.h"
 #include "../include/mmio.h"
@@ -14,7 +15,8 @@
 int* fill_lists(FILE* f, value_node* row_lists[], int size, char pattern, char symmetric, int nz) {
 
     //lists used for initial reading
-    value_node* temp_nodes[size];
+    value_node** temp_nodes = malloc(size*sizeof(value_node));
+
 
     //used for ELLPACK, saves the number of nz per row
     int* row_nz = malloc(size*sizeof(int));
@@ -38,6 +40,8 @@ int* fill_lists(FILE* f, value_node* row_lists[], int size, char pattern, char s
         temp_col--;
         temp_row--;
         
+        //printf("%d %d %lg\n", temp_row, temp_col, temp_val);
+
         value_node* new_node = create_new_node(temp_col, temp_val);
             
         //insert in list, the value is already ordered per column, even in the symmetrical case
@@ -63,7 +67,7 @@ int* fill_lists(FILE* f, value_node* row_lists[], int size, char pattern, char s
             row_nz[temp_col]++;
         }
     }
-    
+    free(temp_nodes);
     return row_nz;
 }
 
@@ -87,6 +91,21 @@ void print_list(value_node* list) {
 
 //############################ CSR functions ####################################
 
+void get_max_min_csr(csr_matrix* matrix, double* max, double* min) {
+
+    //find max min
+    *min = DBL_MAX;
+    *max = DBL_MIN;
+    //print_csr_matrix(*matrix);
+    for (int i = 0; i < matrix->nz; i++) {
+        if (*min > matrix->as[i])
+            *min = matrix->as[i];
+        if (*max < matrix->as[i])
+            *max = matrix->as[i];
+    }
+}
+
+
 //reading matrix and returning a csr struct
 //Complexity O(nz)
 //Memory O(nz)
@@ -108,8 +127,10 @@ csr_matrix* read_matrix_csr(FILE* f, char pattern, char symmetric) {
         to_return->ja = malloc(to_return->nz*2*sizeof(unsigned int));
         to_return->as = malloc(to_return->nz*2*sizeof(double));
     }
+
     //read file into lists, then combine them into the final format
-    value_node* row_lists[to_return->M];
+    value_node** row_lists = malloc(to_return->M*sizeof(value_node));
+
     fill_lists(f, row_lists, to_return->M, pattern, symmetric, to_return->nz);
 
     int c = 0;
@@ -127,7 +148,7 @@ csr_matrix* read_matrix_csr(FILE* f, char pattern, char symmetric) {
         }
     }
     to_return->irp[to_return->M] = to_return->nz;
-    
+    free(row_lists);
     return to_return;
 
 }
@@ -141,6 +162,7 @@ csr_matrix* read_mm_csr(char* filename) {
     FILE *f;
 
 	if ((f = fopen(filename, "r")) == NULL){
+        printf("Filename not found\n");
 		return (csr_matrix*) -1;
 	}
 
@@ -198,9 +220,34 @@ void print_csr_matrix_market(csr_matrix matrix) {
 
 }
 
+void free_matrix_csr(csr_matrix* matrix) {
 
+    free(matrix->irp);
+    free(matrix->ja);
+    free(matrix->as);
+    free(matrix);
+
+}
 
 // ########################### ELLPACK functions ######################################
+
+void get_max_min_ellpack(ellpack_matrix* matrix, double* max, double* min) {
+
+    //find max min
+    *min = DBL_MAX;
+    *max = DBL_MIN;
+    //print_csr_matrix(*matrix);
+    for (int i = 0; i < matrix->M; i++) {
+        for (int j = 0; j < matrix->maxnz; j++) {
+            //printf("%d %d\n", i , j);
+            if (*min > matrix->as[i][j])
+                *min = matrix->as[i][j];
+            if (*max < matrix->as[i][j])
+                *max = matrix->as[i][j];
+        }
+    }
+}
+
 
 //reading matrix and returning a ellpack struct
 //very similar to the csr version
@@ -215,7 +262,8 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
         return (ellpack_matrix*)-4;
 
     //read file into lists
-    value_node* row_lists[to_return->M];
+    value_node** row_lists = malloc(to_return->M*sizeof(value_node));
+    
     int* row_nz = fill_lists(f, row_lists, to_return->M, pattern, symmetric, to_return->nz);
 
     printf("Done with lists\n");
@@ -248,6 +296,7 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
         to_return->as[i] = malloc(to_return->maxnz*sizeof(double));
     }
 
+
     //fill matrices
     for (int i = 0; i < to_return->M; i++) {
         value_node* p = row_lists[i];
@@ -268,6 +317,7 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
         }
     }
 
+    free(row_lists);
     return to_return;
 
 }
@@ -305,6 +355,17 @@ ellpack_matrix* read_mm_ellpack(char* filename) {
 
 }
 
+void free_matrix_ellpack(ellpack_matrix* matrix) {
+
+    for (int i = 0; i < matrix->M; i++) {
+        free(matrix->ja[i]);
+        free(matrix->as[i]);
+    }
+    free(matrix->ja);
+    free(matrix->as);
+    free(matrix);
+
+}
 
 //print matrix in ellpack format (in the format, not the full rectangle)
 void print_ellpack_matrix(ellpack_matrix matrix) {
