@@ -89,6 +89,17 @@ void print_list(value_node* list) {
 
 }
 
+void free_list(value_node* list) {
+
+    value_node* temp = list;    
+    while(temp != NULL) {
+        value_node* temp2 = temp;
+        temp = temp->next;
+        free(temp2);
+    }
+
+}
+
 //############################ CSR functions ####################################
 
 void get_max_min_csr(csr_matrix* matrix, double* max, double* min) {
@@ -131,7 +142,7 @@ csr_matrix* read_matrix_csr(FILE* f, char pattern, char symmetric) {
     //read file into lists, then combine them into the final format
     value_node** row_lists = malloc(to_return->M*sizeof(value_node));
 
-    fill_lists(f, row_lists, to_return->M, pattern, symmetric, to_return->nz);
+    int* row_nz = fill_lists(f, row_lists, to_return->M, pattern, symmetric, to_return->nz);
 
     int c = 0;
     for (int i = 0; i < to_return->M; i++) {
@@ -149,6 +160,7 @@ csr_matrix* read_matrix_csr(FILE* f, char pattern, char symmetric) {
     }
     to_return->irp[to_return->M] = to_return->nz;
     free(row_lists);
+    free(row_nz);
     return to_return;
 
 }
@@ -283,6 +295,11 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
     //check if its worth to use ellpack
     if (to_return->maxnz*to_return->M > ELLPACK_NZ_RATIO*to_return->nz) {
         printf("Too many zeroes, ELLAPACK is not worth\n");
+        //free everithing
+        for(int i = 0; i < to_return->M; i++)
+            free_list(row_lists[i]);
+        free(to_return);
+        free(row_lists);
         return (ellpack_matrix*) -5;
     }
 

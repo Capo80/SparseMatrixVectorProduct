@@ -6,11 +6,13 @@
 #include <unistd.h>
 #include <time.h>
 #include <errno.h>
+#include <omp.h>
 
 #include "include/formats.h"
 #include "include/product.h"
 
 #define EXECUTION_PER_MATRIX 10
+#define MAX_THREADS 4
 
 double* get_random_array(double min, double max, int size) {
 
@@ -61,14 +63,9 @@ int main(int argc, char *argv[]) {
 		return 0;
 	} 
 
-    /* Scanning the in directory */
-    if (NULL == (fd = opendir (matrix_folder))) 
-    {
-        fprintf(stderr, "Error : Failed to open input directory - %s\n", strerror(errno));
-        return 1;
-    }
 
-    printf("Choose matrix format format:\n");
+
+    printf("Choose matrix format:\n");
     printf("1) ELLPACK\n");
     printf("2) CSR\n");
 
@@ -76,84 +73,111 @@ int main(int argc, char *argv[]) {
 
     printf("Choose type of product:\n");
     printf("1) Serial\n");
+    printf("2) Omp parallel\n");
+    
 
     scanf("%d", &product);
 
-    fprintf(results_csv, "%d, %d", product, format);
-        
     printf("Starting calculations...\n");
-    while ((in_file = readdir(fd))) 
-    {
-        if (!strcmp (in_file->d_name, "."))
-            continue;
-        if (!strcmp (in_file->d_name, ".."))    
-            continue;
+    for (int t = 1; t <= MAX_THREADS; t++) {
 
-        flops = 0;
-        char path[280];
-        sprintf(path, "matrices/%s", in_file->d_name);
+        omp_set_num_threads(t);
 
-        if (format == 1) {
-
-            //read matrix from file
-        	ellpack_matrix* matrix = read_mm_ellpack(path);
-        	if ((long) matrix < 0){
-                fprintf(results_csv, ",-1");
-      			continue;
-            }
-
-            //generate random array for product
-        	double min, max;
-        	get_max_min_ellpack(matrix, &max, &min);
-        	double* vector = get_random_array(min, max, matrix->M);
- 			double* result = malloc(matrix->M*sizeof(double));
- 			
-            //Do product
-            for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
-                if (product == 1)    
-                    time = serial_product_ellpack(matrix, vector, result);
-                flops += 2*matrix->nz / time;
-            }
-
-            fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
-            	           
-            printf("Done!! ELLPACK matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops/EXECUTION_PER_MATRIX);
-
-        	free(result);
-        	free(vector);
-        	free_matrix_ellpack(matrix);
-        } else if (format == 2) {
-
-            // read matrxi from file
-        	csr_matrix* matrix = read_mm_csr(path);
-
-            //generate random array for product
-        	double min, max;
-        	get_max_min_csr(matrix, &max, &min);
-        	double* vector = get_random_array(min, max, matrix->M);
- 			double* result = malloc(matrix->M*sizeof(double));
- 			
-            //do product
-            //Do product
-            for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
-                if (product == 1)    
-                    time = serial_product_csr(matrix, vector, result);
-                flops += 2*matrix->nz / time;
-            }
-
-            fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
-
-        	printf("Done!! CSR matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops);
-
-        	free(result);
-        	free(vector);
-        	free_matrix_csr(matrix);
-        } else {
-        	fprintf(stderr, "Error: format is not correct\n");
-            return -1;
+        fprintf(results_csv, "%d, %d, %d", product, format, t);
+    
+        printf("Number of threads: %d\n", t);
+        
+        /* Scanning the in directory */
+        if (NULL == (fd = opendir (matrix_folder))) 
+        {
+            fprintf(stderr, "Error : Failed to open input directory - %s\n", strerror(errno));
+            return 1;
         }
+
+        while ((in_file = readdir(fd))) 
+        {
+            if (!strcmp (in_file->d_name, "."))
+                continue;
+            if (!strcmp (in_file->d_name, ".."))    
+                continue;
+
+            flops = 0;
+            char path[280];
+            sprintf(path, "matrices/%s", in_file->d_name);
+
+            if (format == 1) {
+
+                //read matrix from file
+            	ellpack_matrix* matrix = read_mm_ellpack(path);
+            	if ((long) matrix < 0){
+                    fprintf(results_csv, ",-1");
+          			continue;
+                }
+
+                //generate random array for product
+            	double min, max;
+            	get_max_min_ellpack(matrix, &max, &min);
+            	double* vector = get_random_array(min, max, matrix->M);
+     			double* result = malloc(matrix->M*sizeof(double));
+     			
+                //Do product
+                for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
+                    if (product == 1)    
+                        time = serial_product_ellpack(matrix, vector, result);
+                    else if (product == 2)
+                        time = omp_product_ellpack(matrix, vector, result);    
+                    flops += 2*matrix->nz / time;
+                }
+
+                fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
+                	           
+                printf("Done!! ELLPACK matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops/EXECUTION_PER_MATRIX);
+
+            	free(result);
+            	free(vector);
+            	free_matrix_ellpack(matrix);
+            } else if (format == 2) {
+
+                // read matrxi from file
+            	csr_matrix* matrix = read_mm_csr(path);
+
+                //generate random array for product
+            	double min, max;
+            	get_max_min_csr(matrix, &max, &min);
+            	double* vector = get_random_array(min, max, matrix->M);
+     			double* result = malloc(matrix->M*sizeof(double));
+     			
+                //do product
+                //Do product
+                for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
+                    if (product == 1)    
+                        time = serial_product_csr(matrix, vector, result);
+                    else if (product == 2)
+                        time = omp_product_csr(matrix, vector, result);
+                    flops += 2*matrix->nz / time;
+                }
+
+                fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
+
+            	printf("Done!! CSR matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops);
+
+            	free(result);
+            	free(vector);
+            	free_matrix_csr(matrix);
+            } else {
+            	fprintf(stderr, "Error: format is not correct\n");
+                return -1;
+            }
+        }
+    
+        fprintf(results_csv, "\n");
+        
+        closedir(fd);
+
+        if (product == 1)
+            break;
+
     }
-    fprintf(results_csv, "\n");
     fclose(results_csv);
 
     return 0;
