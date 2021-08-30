@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #include "../include/formats.h"
-#include "../include/product.h"
+#include "../include/product_cpu.h"
 
 double serial_product_csr(csr_matrix* matrix, double* array, double* result) {
 

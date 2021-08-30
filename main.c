@@ -9,7 +9,8 @@
 #include <omp.h>
 
 #include "include/formats.h"
-#include "include/product.h"
+#include "include/product_cpu.h"
+#include "include/product_gpu.h"
 
 #define EXECUTION_PER_MATRIX 10
 #define MAX_THREADS 4
@@ -74,6 +75,7 @@ int main(int argc, char *argv[]) {
     printf("Choose type of product:\n");
     printf("1) Serial\n");
     printf("2) Omp parallel\n");
+    printf("3) CUDA parallel\n");
     
 
     scanf("%d", &product);
@@ -125,7 +127,12 @@ int main(int argc, char *argv[]) {
                     if (product == 1)    
                         time = serial_product_ellpack(matrix, vector, result);
                     else if (product == 2)
-                        time = omp_product_ellpack(matrix, vector, result);    
+                        time = omp_product_ellpack(matrix, vector, result);
+                    else if (product == 3)
+                        time = cuda_product_ellpack(matrix, vector, result);    
+                    else
+                        time = serial_product_ellpack(matrix, vector, result);
+                        
                     flops += 2*matrix->nz / time;
                 }
 
@@ -154,6 +161,10 @@ int main(int argc, char *argv[]) {
                         time = serial_product_csr(matrix, vector, result);
                     else if (product == 2)
                         time = omp_product_csr(matrix, vector, result);
+                    else if (product == 3)
+                        time = cuda_product_csr(matrix, vector, result);    
+                    else
+                        time = serial_product_csr(matrix, vector, result);
                     flops += 2*matrix->nz / time;
                 }
 
