@@ -20,7 +20,7 @@ c'è una reduction su ogni riga, le righe tra di loro sono indipendenti
 idea? mantenere riga all'interno di un solo blocco? evitare problematiche di reduction intra-blocco
 
 possibilità
-- una riga per blocco
+- una riga per blocco NO, troppi blocchi
 - più righe in un blocco (ragionare in warp?)
 
 - una riga per warp
