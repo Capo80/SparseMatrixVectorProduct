@@ -12,6 +12,7 @@ in this order on csv, static is better
 possible improvements
 - make ellpack ja & as a real matrix
 - loop unroll
+- pull the arrays out of the structure to save one memory read per cycle
 
 ### GPU
 

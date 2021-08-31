@@ -158,7 +158,12 @@ csr_matrix* read_matrix_csr(FILE* f, char pattern, char symmetric) {
             free(temp);
         }
     }
-    to_return->irp[to_return->M] = to_return->nz;
+    if (!symmetric)
+        to_return->irp[to_return->M] = to_return->nz;
+    else {
+        to_return->nz = to_return->nz*2;
+        to_return->irp[to_return->M] = to_return->nz;
+    }
     free(row_lists);
     free(row_nz);
     return to_return;
@@ -207,15 +212,15 @@ void print_csr_matrix(csr_matrix matrix) {
 		printf("%lg ", matrix.as[i]);
 	printf("\n");
 
-	printf("IRP: ");
-	for (int i = 0; i < matrix.M+1; i++)
-		printf("%d ", matrix.irp[i]);
-	printf("\n");
-
 	printf("JA: ");
 	for (int i = 0; i < matrix.nz; i++)
 		printf("%d ", matrix.ja[i]);
 	printf("\n");
+
+    printf("IRP: ");
+    for (int i = 0; i < matrix.M+1; i++)
+        printf("%d ", matrix.irp[i]);
+    printf("\n");
 
 	printf("Rows: %d\t Columns: %d\t NZ: %d\n", matrix.M, matrix.N, matrix.nz);
 
@@ -279,6 +284,9 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
     int* row_nz = fill_lists(f, row_lists, to_return->M, pattern, symmetric, to_return->nz);
 
     printf("Done with lists\n");
+
+    if (symmetric) 
+        to_return->nz = to_return->nz*2;
 
     //find max number of non-zero
     to_return->maxnz = 0;

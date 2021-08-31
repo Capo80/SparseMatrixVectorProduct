@@ -42,6 +42,7 @@ int main(int argc, char *argv[]) {
     struct dirent* in_file;
     char* matrix_folder = "matrices";
     double time, flops = 0;
+    float time_single, flops_single = 0;
 
     results_csv = fopen("results.csv","a");
 
@@ -87,7 +88,8 @@ int main(int argc, char *argv[]) {
 
         fprintf(results_csv, "%d, %d, %d", product, format, t);
     
-        printf("Number of threads: %d\n", t);
+        if (product != 3)
+            printf("Number of threads: %d\n", t);
         
         /* Scanning the in directory */
         if (NULL == (fd = opendir (matrix_folder))) 
@@ -128,18 +130,26 @@ int main(int argc, char *argv[]) {
                         time = serial_product_ellpack(matrix, vector, result);
                     else if (product == 2)
                         time = omp_product_ellpack(matrix, vector, result);
-                    else if (product == 3)
-                        time = cuda_product_ellpack(matrix, vector, result);    
-                    else
+                    else if (product == 3) {
+                        time_single = cuda_product_ellpack(matrix, vector, result);    
+                        flops_single += 2*matrix->nz /time_single;
+                        continue;
+                    }
+                    else 
                         time = serial_product_ellpack(matrix, vector, result);
                         
                     flops += 2*matrix->nz / time;
                 }
-
-                fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
-                	           
-                printf("Done!! ELLPACK matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops/EXECUTION_PER_MATRIX);
-
+                if (product == 3) {
+                    fprintf(results_csv, ",%f", flops_single/EXECUTION_PER_MATRIX);
+                                   
+                    printf("Done!! ELLPACK matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time_single, flops_single/EXECUTION_PER_MATRIX);
+                
+                } else {
+                    fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
+                    	           
+                    printf("Done!! ELLPACK matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops/EXECUTION_PER_MATRIX);
+                }
             	free(result);
             	free(vector);
             	free_matrix_ellpack(matrix);
@@ -154,24 +164,32 @@ int main(int argc, char *argv[]) {
             	double* vector = get_random_array(min, max, matrix->M);
      			double* result = malloc(matrix->M*sizeof(double));
      			
-                //do product
                 //Do product
                 for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
                     if (product == 1)    
                         time = serial_product_csr(matrix, vector, result);
                     else if (product == 2)
                         time = omp_product_csr(matrix, vector, result);
-                    else if (product == 3)
-                        time = cuda_product_csr(matrix, vector, result);    
+                    else if (product == 3) {
+                        time_single = cuda_product_csr(matrix, vector, result);
+                        flops_single += 2*matrix->nz /time_single;
+                        continue;
+                    } 
                     else
                         time = serial_product_csr(matrix, vector, result);
                     flops += 2*matrix->nz / time;
                 }
 
-                fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
+                if (product == 3) {
+                    fprintf(results_csv, ",%f", flops_single/EXECUTION_PER_MATRIX);
+                                   
+                    printf("Done!! CSR matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time_single, flops_single/EXECUTION_PER_MATRIX);
+                
+                } else {
+                    fprintf(results_csv, ",%lf", flops/EXECUTION_PER_MATRIX);
 
-            	printf("Done!! CSR matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops);
-
+                	printf("Done!! CSR matrix product: %s\nTime: %lf\nFLOPS: %lf\n", in_file->d_name, time, flops);
+                }
             	free(result);
             	free(vector);
             	free_matrix_csr(matrix);
@@ -185,7 +203,7 @@ int main(int argc, char *argv[]) {
         
         closedir(fd);
 
-        if (product == 1)
+        if (product == 1 || product == 3)
             break;
 
     }

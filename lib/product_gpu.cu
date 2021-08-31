@@ -69,52 +69,96 @@ template <unsigned int THD> __global__ void product_one_row_one_block_csr(csr_ma
 
 }
 
-__global__ void product_one_row_one_warp_csr(csr_matrix* matrix, double* array, double* result) {
+__global__ void product_one_row_one_warp_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
+
+   __shared__ double warp_sum[BLOCK_SIZE];
+
+   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+   int b_tid = threadIdx.x;
+   int warp_id = tid % WARP_SIZE;
+   int row = tid / WARP_SIZE;
+   int i;
+   printf("%d\n", tid);
+   if (row < M) {
+
+      // warp sums row
+      int limit = irp[row+1];
+      warp_sum[b_tid] = 0;
+      for (i = irp[row] + warp_id; i < limit; i += WARP_SIZE) {
+         warp_sum[b_tid] += as[i] * array[ja[i]];
+      }
+
+
+      //no need to sync we have only one warp
+      warp_sum[b_tid] += warp_sum[b_tid + 16];
+      warp_sum[b_tid] += warp_sum[b_tid + 8];
+      warp_sum[b_tid] += warp_sum[b_tid + 4];
+      warp_sum[b_tid] += warp_sum[b_tid + 2];
+      warp_sum[b_tid] += warp_sum[b_tid + 1];
+
+      //reduction over, save result in final array
+      if (warp_id == 0) {
+         result[row] = warp_sum[b_tid];
+         
+      }
+
+   }
+
 
 }
 
 extern "C"
-double cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
+float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
 
-   printf("block_size: %d\n", matrix->M);
-
-   csr_matrix* matrix_gpu;
-   csr_matrix* matrix_inter = (csr_matrix*) malloc(sizeof(csr_matrix));
+   int* irp_gpu;
+   int* ja_gpu;
+   double* as_gpu;
    double* array_gpu;
    double* result_gpu;
+
    //alloc arguments
-   printf("allocation finished\n");
-   gpuErrchk( cudaMalloc((void**) &matrix_gpu, sizeof(csr_matrix)) );
-   gpuErrchk( cudaMalloc((void**) &matrix_inter->irp, sizeof(int)*matrix->M) );
-   gpuErrchk( cudaMalloc((void**) &matrix_inter->ja, sizeof(int)*matrix->nz) );
-   gpuErrchk( cudaMalloc((void**) &matrix_inter->as, sizeof(double)*matrix->nz) );
+   gpuErrchk( cudaMalloc((void**) &irp_gpu, sizeof(int)*(matrix->M+1)) );
+   gpuErrchk( cudaMalloc((void**) &ja_gpu, sizeof(int)*matrix->nz) );
+   gpuErrchk( cudaMalloc((void**) &as_gpu, sizeof(double)*matrix->nz) );
    gpuErrchk( cudaMalloc((void**) &array_gpu, sizeof(double)*matrix->M) );
    gpuErrchk( cudaMalloc((void**) &result_gpu, sizeof(double)*matrix->M) );
 
-   printf("allocation finished\n");
-
    //copy arguments
-   gpuErrchk( cudaMemcpy(matrix_gpu, matrix_inter, sizeof(csr_matrix), cudaMemcpyHostToDevice) );
+   gpuErrchk( cudaMemcpy(irp_gpu, matrix->irp, sizeof(int)*(matrix->M+1), cudaMemcpyHostToDevice) );
+   gpuErrchk( cudaMemcpy(ja_gpu, matrix->ja, sizeof(int)*matrix->nz, cudaMemcpyHostToDevice) );
+   gpuErrchk( cudaMemcpy(as_gpu, matrix->as, sizeof(double)*matrix->nz, cudaMemcpyHostToDevice) );
    gpuErrchk( cudaMemcpy(array_gpu, array, sizeof(double)*matrix->M, cudaMemcpyHostToDevice) );
    gpuErrchk( cudaMemcpy(result_gpu, matrix, sizeof(double)*matrix->M, cudaMemcpyHostToDevice) );
    
-   printf("copy finished\n");
+   //set up timer
+   cudaEvent_t start, stop;
+   gpuErrchk( cudaEventCreate(&start) );
+   gpuErrchk( cudaEventCreate(&stop) );
 
-   product_one_row_one_block_csr<1024><<<10,1024, sizeof(double)*1024>>>(matrix_gpu, array_gpu, result_gpu);      
-   cudaError_t cudaerr = cudaDeviceSynchronize();
-   gpuErrchk( cudaPeekAtLastError() );
-   gpuErrchk( cudaDeviceSynchronize() );
+   gpuErrchk( cudaEventRecord(start, 0) );
+   if (WARP_SIZE*matrix->M >= BLOCK_SIZE) {
+      product_one_row_one_warp_csr<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
+   } else {
+      product_one_row_one_warp_csr<<<1, matrix->M*WARP_SIZE, sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
+   }
+   gpuErrchk( cudaEventRecord(stop, 0) );
+   gpuErrchk( cudaEventSynchronize(stop) );
 
+   float time;
+   gpuErrchk( cudaEventElapsedTime(&time, start, stop) );
+   
+   gpuErrchk( cudaMemcpy(result, result_gpu, sizeof(double)*matrix->M, cudaMemcpyDeviceToHost) );
+   
    //free everything
-   gpuErrchk( cudaFree(matrix_gpu) );
-   gpuErrchk( cudaFree(matrix_gpu->irp) );
-   gpuErrchk( cudaFree(matrix_gpu->ja) );
-   gpuErrchk( cudaFree(matrix_gpu->as) );
+   gpuErrchk( cudaFree(irp_gpu) );
+   gpuErrchk( cudaFree(ja_gpu) );
+   gpuErrchk( cudaFree(as_gpu) );
    gpuErrchk( cudaFree(result_gpu) );
    gpuErrchk( cudaFree(array_gpu) );
+   gpuErrchk( cudaEventDestroy(start) );
+   gpuErrchk( cudaEventDestroy(stop) );
 
-   free(matrix_inter);
-   return 0.0;
+   return time;
 
 }
 
