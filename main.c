@@ -13,7 +13,7 @@
 #include "include/product_gpu.h"
 
 #define EXECUTION_PER_MATRIX 10
-#define MAX_THREADS 4
+#define MAX_THREADS 40
 
 double* get_random_array(double min, double max, int size) {
 
@@ -26,7 +26,7 @@ double* get_random_array(double min, double max, int size) {
 
     srand(1234);
 
-    double* array = malloc(size*sizeof(double));
+    double* array = (double*) malloc(size*sizeof(double));
 
     for (int i = 0; i < size; i++)
     	array[i] = (double)rand()/RAND_MAX*2*max-min;
@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
     scanf("%d", &product);
 
     printf("Starting calculations...\n");
-    for (int t = 1; t <= MAX_THREADS; t++) {
+    for (int t = 40; t <= MAX_THREADS; t++) {
 
         omp_set_num_threads(t);
 
@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
             	double min, max;
             	get_max_min_ellpack(matrix, &max, &min);
             	double* vector = get_random_array(min, max, matrix->M);
-     			double* result = malloc(matrix->M*sizeof(double));
+     			double* result = (double*) malloc(matrix->M*sizeof(double));
      			
                 //Do product
                 for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
@@ -132,7 +132,7 @@ int main(int argc, char *argv[]) {
                         time = omp_product_ellpack(matrix, vector, result);
                     else if (product == 3) {
                         time_single = cuda_product_ellpack(matrix, vector, result);    
-                        flops_single += 2*matrix->nz /time_single;
+                        flops_single += 2*matrix->nz / time_single * 1000; //time from gpu is in milliseconds
                         continue;
                     }
                     else 
@@ -162,7 +162,7 @@ int main(int argc, char *argv[]) {
             	double min, max;
             	get_max_min_csr(matrix, &max, &min);
             	double* vector = get_random_array(min, max, matrix->M);
-     			double* result = malloc(matrix->M*sizeof(double));
+     			double* result = (double*) malloc(matrix->M*sizeof(double));
      			
                 //Do product
                 for (int i = 0; i < EXECUTION_PER_MATRIX; i++) {
@@ -172,7 +172,7 @@ int main(int argc, char *argv[]) {
                         time = omp_product_csr(matrix, vector, result);
                     else if (product == 3) {
                         time_single = cuda_product_csr(matrix, vector, result);
-                        flops_single += 2*matrix->nz /time_single;
+                        flops_single += 2*matrix->nz /time_single * 1000; // time from gpu is in milliseconds 
                         continue;
                     } 
                     else

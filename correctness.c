@@ -7,6 +7,7 @@
 #include <time.h>
 #include <errno.h>
 #include <omp.h>
+#include <math.h>
 
 #include "include/formats.h"
 #include "include/product_cpu.h"
@@ -17,19 +18,19 @@
 
 double* get_random_array(double min, double max, int size) {
 
-	if (min == max) {
-		min -= 10;
-		max += 10;
-	}
+    if (min == max) {
+        min -= 10;
+        max += 10;
+    }
 
-	double random_value;
+    double random_value;
 
     srand(1234);
 
-    double* array = malloc(size*sizeof(double));
+    double* array = (double*) malloc(size*sizeof(double));
 
     for (int i = 0; i < size; i++)
-    	array[i] = (double)rand()/RAND_MAX*2*max-min;
+        array[i] = (double)rand()/RAND_MAX*2*max-min;
 
     return array;
 }
@@ -102,7 +103,7 @@ int main(int argc, char *argv[]) {
             //generate random array for product
         	double min, max;
         	get_max_min_ellpack(matrix, &max, &min);
-        	double* vector = get_random_array(min, max, matrix->M);
+        	double* vector = get_random_array(min, max, matrix->N);
  			double* result_serial = malloc(matrix->M*sizeof(double));
  			double* result_omp = malloc(matrix->M*sizeof(double));
             double* result_cuda = malloc(matrix->M*sizeof(double));
@@ -129,7 +130,7 @@ int main(int argc, char *argv[]) {
             //generate random array for product
         	double min, max;
         	get_max_min_csr(matrix, &max, &min);
-        	double* vector = get_random_array(min, max, matrix->M);
+        	double* vector = get_random_array(min, max, matrix->N);
             double* result_serial = malloc(matrix->M*sizeof(double));
             double* result_omp = malloc(matrix->M*sizeof(double));
             double* result_cuda = malloc(matrix->M*sizeof(double));
@@ -139,9 +140,28 @@ int main(int argc, char *argv[]) {
             omp_product_csr(matrix, vector, result_omp);
             cuda_product_csr(matrix, vector, result_cuda);    
 
-            printf("Results (%s): \n", in_file->d_name);
-            for (int i = 0; i < matrix->M; i++)
-                printf("%lg %lg %lg\n", result_serial[i], result_omp[i], result_cuda[i]);
+            int correct = 1;
+            double max_relative_error = 0;
+            for (int i = 0; i < matrix->M; i++) {
+                //double point precision is 10E-14
+                //printf("%lg %lg\n", fabs(result_serial[i] - result_cuda[i]) / fabs(result_serial[i]), fabs(result_serial[i] - result_cuda[i]) / fabs(result_cuda[i]));
+                double relative_error = fabs(result_serial[i] - result_cuda[i]) / fabs(result_serial[i]);
+                if (max_relative_error < relative_error)
+                    max_relative_error = relative_error;
+                if (relative_error > 10E-8) {
+                    printf("%lg %lg %lg %d\n", relative_error, result_serial[i], result_cuda[i], i);
+                    correct = 0;                   
+                }
+            }
+
+            printf("Matrix: %s\n", in_file->d_name);
+            printf("Matrix max relative error: %lg\n", max_relative_error);
+            printf("Max number of matrix: %lg\n", max);
+
+            if (correct)
+                printf("The algorithms have the same result up to 10e-7!\n");
+            else
+                printf("The algorithms do not have the same result!\n");    
 
             free(result_serial);
             free(result_omp);
@@ -152,8 +172,7 @@ int main(int argc, char *argv[]) {
         	fprintf(stderr, "Error: format is not correct\n");
             return -1;
         }
-
-        break;
+        
     }
 
     closedir(fd);

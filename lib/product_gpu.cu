@@ -16,8 +16,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
    }
 }
 
-//dumb
-template <unsigned int THD> __global__ void product_one_row_one_block_csr(csr_matrix* matrix, double* array, double* result) {
+template <unsigned int THD> __global__ void product_one_row_one_block_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
 
    //block sum
 	__shared__ double block_sum[THD];
@@ -26,44 +25,43 @@ template <unsigned int THD> __global__ void product_one_row_one_block_csr(csr_ma
    int row = blockIdx.x;
    int i;
 
+   block_sum[tid] = 0;
    //check row
-   if (row < matrix->M) {
+   if (row < M) {
 
       //check thread
-      int limit = matrix->irp[row+1];
-      int row_elements = matrix->irp[row] - limit;
-      if (tid < row_elements) {
-         
-         // block sums row
-         for (i = matrix->irp[row] + tid; i < limit; i += blockDim.x)
-            block_sum[tid] += matrix->as[i] * array[matrix->ja[i]];
+      int limit = irp[row+1];
 
-         //wait for all to finish
-         __syncthreads();
+      // block sums row
+      double sum = 0;
+      for (i = irp[row] + tid; i < limit; i += blockDim.x)
+         sum += as[i] * array[ja[i]];
+      
+      block_sum[tid] = sum;
+      //wait for all to finish
+      __syncthreads();
 
-         //block reduction (max efficency)
-         if (THD >= 1024) { if (tid < 512) { block_sum[tid] += block_sum[tid + 512]; } __syncthreads(); }
+      //block reduction (max efficency)
+      if (THD >= 1024) { if (tid < 512) { block_sum[tid] += block_sum[tid + 512]; } __syncthreads(); }
 
-         if (THD >= 512) { if (tid < 256) { block_sum[tid] += block_sum[tid + 256]; } __syncthreads(); }
+      if (THD >= 512) { if (tid < 256) { block_sum[tid] += block_sum[tid + 256]; } __syncthreads(); }
 
-         if (THD >= 256) { if (tid < 128) { block_sum[tid] += block_sum[tid + 128]; } __syncthreads(); }
+      if (THD >= 256) { if (tid < 128) { block_sum[tid] += block_sum[tid + 128]; } __syncthreads(); }
 
-         if (THD >= 128) { if (tid < 64) { block_sum[tid] += block_sum[tid + 64]; } __syncthreads(); }
+      if (THD >= 128) { if (tid < 64) { block_sum[tid] += block_sum[tid + 64]; } __syncthreads(); }
 
-         if (THD >= 64) { if (tid < 32) { block_sum[tid] += block_sum[tid + 32]; } __syncthreads(); }
+      if (THD >= 64) { if (tid < 32) { block_sum[tid] += block_sum[tid + 32]; } __syncthreads(); }
 
-         //last warp
-         if (tid < 32) { block_sum[tid] += block_sum[tid + 32]; }
-         if (tid < 16) { block_sum[tid] += block_sum[tid + 16]; }
-         if (tid < 8) { block_sum[tid] += block_sum[tid + 8]; }
-         if (tid < 4) { block_sum[tid] += block_sum[tid + 4]; }
-         if (tid < 2) { block_sum[tid] += block_sum[tid + 2]; }
-         if (tid < 1) { block_sum[tid] += block_sum[tid + 1]; }
+      //last warp
+      if (tid < 16) { block_sum[tid] += block_sum[tid + 16]; __syncwarp(); }
+      if (tid < 8) { block_sum[tid] += block_sum[tid + 8]; __syncwarp(); }
+      if (tid < 4) { block_sum[tid] += block_sum[tid + 4]; __syncwarp(); }
+      if (tid < 2) { block_sum[tid] += block_sum[tid + 2]; __syncwarp(); }
+      if (tid < 1) { block_sum[tid] += block_sum[tid + 1]; __syncwarp(); }
 
-         //reduction over, save result in final array
-         if (tid == 0)
-            result[row] = block_sum[tid];
-      }
+      //reduction over, save result in final array
+      if (tid == 0)
+         result[row] = block_sum[tid];
 
    }
 
@@ -78,34 +76,87 @@ __global__ void product_one_row_one_warp_csr(int M, int* irp, int* ja, double* a
    int warp_id = tid % WARP_SIZE;
    int row = tid / WARP_SIZE;
    int i;
-   printf("%d\n", tid);
+   //printf("%d\n", tid);
+
+   warp_sum[b_tid] = 0;
    if (row < M) {
 
       // warp sums row
       int limit = irp[row+1];
-      warp_sum[b_tid] = 0;
+      double sum = 0;
       for (i = irp[row] + warp_id; i < limit; i += WARP_SIZE) {
-         warp_sum[b_tid] += as[i] * array[ja[i]];
+         sum += as[i] * array[ja[i]];
       }
 
+      warp_sum[b_tid] = sum;
+      
+      __syncwarp();
 
       //no need to sync we have only one warp
-      warp_sum[b_tid] += warp_sum[b_tid + 16];
-      warp_sum[b_tid] += warp_sum[b_tid + 8];
-      warp_sum[b_tid] += warp_sum[b_tid + 4];
-      warp_sum[b_tid] += warp_sum[b_tid + 2];
-      warp_sum[b_tid] += warp_sum[b_tid + 1];
+      if (warp_id < 16) { warp_sum[b_tid] += warp_sum[b_tid + 16]; __syncwarp();}
+      
+      if (warp_id < 8) { warp_sum[b_tid] += warp_sum[b_tid + 8]; __syncwarp();}
 
+      if (warp_id < 4) { warp_sum[b_tid] += warp_sum[b_tid + 4]; __syncwarp();}
+      
+      if (warp_id < 2) { warp_sum[b_tid] += warp_sum[b_tid + 2]; __syncwarp();}
+      
+      if (warp_id < 1) { warp_sum[b_tid] += warp_sum[b_tid + 1]; __syncwarp();}
+      
       //reduction over, save result in final array
       if (warp_id == 0) {
          result[row] = warp_sum[b_tid];
-         
       }
 
    }
 
 
 }
+
+__global__ void product_one_row_one_thread_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
+
+   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+   int row = tid;
+   int i;
+   //printf("%d\n", tid);
+
+   if (row < M) {
+
+      // warp sums row
+      int limit = irp[row+1];
+      double sum = 0;
+      for (i = irp[row]; i < limit; i += 1) {
+         sum += as[i] * array[ja[i]];
+      }
+
+      result[row] = sum;
+      
+   }
+
+
+}
+
+template <unsigned int N> __global__ void product_N_row_one_thread_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
+
+   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+   int row_start = tid*N;
+   int row_end = tid*N + N;
+   int i;
+   //printf("%d\n", tid);
+
+   // warp sums row
+   for (; row_start < row_end && row_start < M; row_start++) {
+      double sum = 0;
+      int limit = irp[row_start+1];
+      for (i = irp[row_start]; i < limit; i += 1) {
+         sum += as[i] * array[ja[i]];
+      }
+
+      result[row_start] = sum;
+   }
+
+}
+
 
 extern "C"
 float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
@@ -135,13 +186,19 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
    gpuErrchk( cudaEventCreate(&start) );
    gpuErrchk( cudaEventCreate(&stop) );
 
-   gpuErrchk( cudaEventRecord(start, 0) );
-   if (WARP_SIZE*matrix->M >= BLOCK_SIZE) {
-      product_one_row_one_warp_csr<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
+/*   if (WARP_SIZE*matrix->M >= BLOCK_SIZE || 1) {
+      //product_N_row_one_thread_csr<2><<<matrix->M / 2 / 1024 + 1, BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);
+      //product_one_row_one_thread_csr<<<matrix->M / 1024 + 1, BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);
+      //product_one_row_one_block_csr<BLOCK_SIZE><<<matrix->M, BLOCK_SIZE, sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);
+      //product_one_row_one_warp_csr<<<10, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
    } else {
       product_one_row_one_warp_csr<<<1, matrix->M*WARP_SIZE, sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
-   }
+   }*/
+
+   gpuErrchk( cudaEventRecord(start, 0) );
+   product_one_row_one_warp_csr<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE + 1, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
    gpuErrchk( cudaEventRecord(stop, 0) );
+
    gpuErrchk( cudaEventSynchronize(stop) );
 
    float time;
@@ -161,6 +218,7 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
    return time;
 
 }
+
 
 extern "C"
 double cuda_product_ellpack(ellpack_matrix* matrix, double* array, double* result) {
