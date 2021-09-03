@@ -1,7 +1,8 @@
 #ifndef FORMATS_H
 #define FORMATS_H
 
-#define ELLPACK_NZ_RATIO 3
+#define ELLPACK_NZ_RATIO 5
+#define ALWAYS_ELLPACK_NZ_RATIO 1000
 
 typedef struct 
 {
@@ -19,8 +20,8 @@ typedef struct
 	unsigned int N;
 	unsigned int nz;
 	unsigned int maxnz;
-	unsigned int** ja;
-	double** as;
+	unsigned int* ja;
+	double* as;
 } ellpack_matrix;
 
 typedef struct value_node {

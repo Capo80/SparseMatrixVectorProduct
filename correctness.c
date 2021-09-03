@@ -13,7 +13,6 @@
 #include "include/product_cpu.h"
 #include "include/product_gpu.h"
 
-#define EXECUTION_PER_MATRIX 10
 #define MAX_THREADS 4
 
 double* get_random_array(double min, double max, int size) {
@@ -79,7 +78,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error : Failed to open input directory - %s\n", strerror(errno));
         return 1;
     }
-
+    int correct = 1;
+            
     while ((in_file = readdir(fd))) 
     {
         if (!strcmp (in_file->d_name, "."))
@@ -96,7 +96,8 @@ int main(int argc, char *argv[]) {
             //read matrix from file
         	ellpack_matrix* matrix = read_mm_ellpack(path);
         	if ((long) matrix < 0){
-                fprintf(results_csv, ",-1");
+                printf("Matrix: %s\n", in_file->d_name);
+                printf("--------\n");
       			continue;
             }
 
@@ -107,20 +108,41 @@ int main(int argc, char *argv[]) {
  			double* result_serial = malloc(matrix->M*sizeof(double));
  			double* result_omp = malloc(matrix->M*sizeof(double));
             double* result_cuda = malloc(matrix->M*sizeof(double));
-            
+
             //Do product
             serial_product_ellpack(matrix, vector, result_serial);
             omp_product_ellpack(matrix, vector, result_omp);
             cuda_product_ellpack(matrix, vector, result_cuda);    
 
-            printf("Results: \n");
-            for (int i = 0; i < matrix->M; i++)
-                printf("%lg %lg %lg\n", result_serial[i], result_omp[i], result_cuda[i]);
+            double max_relative_error = 0;
+            for (int i = 0; i < matrix->M; i++) {
+                //double point precision is 10E-14
+                //printf("%lg %lg\n", fabs(result_serial[i] - result_cuda[i]) / fabs(result_serial[i]), fabs(result_serial[i] - result_cuda[i]) / fabs(result_cuda[i]));
+                double relative_error = fabs(result_serial[i] - result_cuda[i]) / fabs(result_serial[i]);
+                if (max_relative_error < relative_error)
+                    max_relative_error = relative_error;
+                if (relative_error > 10E-8) {
+                    printf("cuda: %lg %lg %lg %d\n", relative_error, result_serial[i], result_cuda[i], i);
+                    correct = 0;                   
+                }
+                relative_error = fabs(result_serial[i] - result_omp[i]) / fabs(result_serial[i]);
+                if (max_relative_error < relative_error)
+                    max_relative_error = relative_error;
+                if (relative_error > 10E-8) {
+                    printf("omp: %lg %lg %lg %d\n", relative_error, result_serial[i], result_omp[i], i);
+                    correct = 0;                   
+                }
+            }
 
-        	free(result_serial);
+            printf("Matrix: %s\n", in_file->d_name);
+            printf("Max relative error: %lg\n", max_relative_error);
+            printf("Max element: %lg\n", max);
+            printf("--------\n");
+
+            free(result_serial);
             free(result_omp);
             free(result_cuda);
-        	free(vector);
+            free(vector);
         	free_matrix_ellpack(matrix);
         } else if (format == 2) {
 
@@ -140,7 +162,6 @@ int main(int argc, char *argv[]) {
             omp_product_csr(matrix, vector, result_omp);
             cuda_product_csr(matrix, vector, result_cuda);    
 
-            int correct = 1;
             double max_relative_error = 0;
             for (int i = 0; i < matrix->M; i++) {
                 //double point precision is 10E-14
@@ -149,19 +170,22 @@ int main(int argc, char *argv[]) {
                 if (max_relative_error < relative_error)
                     max_relative_error = relative_error;
                 if (relative_error > 10E-8) {
-                    printf("%lg %lg %lg %d\n", relative_error, result_serial[i], result_cuda[i], i);
+                    printf("cuda: %lg %lg %lg %d\n", relative_error, result_serial[i], result_cuda[i], i);
+                    correct = 0;                   
+                }
+                relative_error = fabs(result_serial[i] - result_omp[i]) / fabs(result_serial[i]);
+                if (max_relative_error < relative_error)
+                    max_relative_error = relative_error;
+                if (relative_error > 10E-8) {
+                    printf("omp: %lg %lg %lg %d\n", relative_error, result_serial[i], result_omp[i], i);
                     correct = 0;                   
                 }
             }
 
             printf("Matrix: %s\n", in_file->d_name);
-            printf("Matrix max relative error: %lg\n", max_relative_error);
-            printf("Max number of matrix: %lg\n", max);
-
-            if (correct)
-                printf("The algorithms have the same result up to 10e-7!\n");
-            else
-                printf("The algorithms do not have the same result!\n");    
+            printf("Max relative error: %lg\n", max_relative_error);
+            printf("Max element: %lg\n", max);
+            printf("--------\n");
 
             free(result_serial);
             free(result_omp);
@@ -175,6 +199,11 @@ int main(int argc, char *argv[]) {
         
     }
 
+    if (correct)
+        printf("The algorithms have the same result with the HIGHEST relative error smaller than 10e-8!\n");
+    else
+        printf("The algorithms do not have the same result!\n");    
+    
     closedir(fd);
 
     return 0;

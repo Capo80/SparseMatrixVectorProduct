@@ -257,10 +257,11 @@ void get_max_min_ellpack(ellpack_matrix* matrix, double* max, double* min) {
     for (int i = 0; i < matrix->M; i++) {
         for (int j = 0; j < matrix->maxnz; j++) {
             //printf("%d %d\n", i , j);
-            if (*min > matrix->as[i][j])
-                *min = matrix->as[i][j];
-            if (*max < matrix->as[i][j])
-                *max = matrix->as[i][j];
+            int index = i*matrix->maxnz + j;
+            if (*min > matrix->as[index])
+                *min = matrix->as[index];
+            if (*max < matrix->as[index])
+                *max = matrix->as[index];
         }
     }
 }
@@ -283,7 +284,7 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
     
     int* row_nz = fill_lists(f, row_lists, to_return->M, pattern, symmetric, to_return->nz);
 
-    printf("Done with lists\n");
+    //printf("Done with lists\n");
 
     if (symmetric) 
         to_return->nz = to_return->nz*2;
@@ -296,12 +297,12 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
     }
 
     free(row_nz);
-    printf("Max found: %d\n", to_return->maxnz);
+    //printf("Max found: %d\n", to_return->maxnz);
     
 #ifndef ELLPACK_ALWAYS
 
     //check if its worth to use ellpack
-    if (to_return->maxnz*to_return->M > ELLPACK_NZ_RATIO*to_return->nz) {
+    if ((unsigned long) to_return->maxnz*to_return->M > (unsigned long) ELLPACK_NZ_RATIO*to_return->nz) {
         printf("Too many zeroes, ELLAPACK is not worth\n");
         //free everithing
         for(int i = 0; i < to_return->M; i++)
@@ -313,13 +314,20 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
 
 #endif
 
-    //alloc memory
-    to_return->ja = malloc(to_return->M*sizeof(unsigned int*));
-    to_return->as = malloc(to_return->M*sizeof(double*));
-    for (int i = 0; i < to_return->M; i++) {
-        to_return->ja[i] = malloc(to_return->maxnz*sizeof(unsigned int));
-        to_return->as[i] = malloc(to_return->maxnz*sizeof(double));
+    //some cases are really not doable
+    if ((unsigned long) to_return->maxnz*to_return->M > (unsigned long) ALWAYS_ELLPACK_NZ_RATIO*to_return->nz) {
+        printf("Too many zeroes, ELLAPACK is REALLY not worth\n");
+        //free everithing
+        for(int i = 0; i < to_return->M; i++)
+            free_list(row_lists[i]);
+        free(to_return);
+        free(row_lists);
+        return (ellpack_matrix*) -5;
     }
+
+    //alloc memory
+    to_return->ja = malloc((unsigned long)to_return->M*to_return->maxnz*sizeof(unsigned int));
+    to_return->as = malloc((unsigned long)to_return->M*to_return->maxnz*sizeof(double));
 
 
     //fill matrices
@@ -327,17 +335,21 @@ ellpack_matrix* read_matrix_ellpack(FILE* f, char pattern, char symmetric) {
         value_node* p = row_lists[i];
         int last_col = 0;
         for (int j = 0; j < to_return->maxnz; j++) {
-            //printf("%d %d %d\n", i, j, p->column);
+            unsigned long index = i*to_return->maxnz + j;
             if (p != NULL) {
-                to_return->ja[i][j] = p->column;
-                to_return->as[i][j] = p->value;
+                //if (index > (unsigned long)to_return->M*to_return->maxnz)    
+                //    printf("%d %d %d %d %d %d %d\n", i, j, p->column, to_return->maxnz, to_return->M*to_return->maxnz, index, to_return->M);
+                to_return->ja[index] = p->column;
+                to_return->as[index] = p->value;
                 last_col = p->column;
                 value_node* temp = p;
                 p = p->next;        
                 free(temp);
             } else {
-                to_return->ja[i][j] = last_col;
-                to_return->as[i][j] = 0;
+                //if (index > (unsigned long)to_return->M*to_return->maxnz)    
+                //    printf("%d %d %d %d %d %d\n", i, j, to_return->maxnz, to_return->M*to_return->maxnz, index, to_return->M);
+                to_return->ja[index] = last_col;
+                to_return->as[index] = 0;
             }
         }
     }
@@ -382,10 +394,6 @@ ellpack_matrix* read_mm_ellpack(char* filename) {
 
 void free_matrix_ellpack(ellpack_matrix* matrix) {
 
-    for (int i = 0; i < matrix->M; i++) {
-        free(matrix->ja[i]);
-        free(matrix->as[i]);
-    }
     free(matrix->ja);
     free(matrix->as);
     free(matrix);
@@ -398,7 +406,7 @@ void print_ellpack_matrix(ellpack_matrix matrix) {
     printf("AS:\n");
     for (int i = 0; i < matrix.M; i++) {
         for (int j = 0; j < matrix.maxnz; j++) {
-            printf("%lg  ", matrix.as[i][j]);
+            printf("%lg  ", matrix.as[i*matrix.maxnz + j]);
         }
         printf("\n");
     }
@@ -407,7 +415,7 @@ void print_ellpack_matrix(ellpack_matrix matrix) {
     printf("JA:\n");
     for (int i = 0; i < matrix.M; i++) {
         for (int j = 0; j < matrix.maxnz; j++) {
-            printf("%d  ", matrix.ja[i][j]);
+            printf("%d  ", matrix.ja[i*matrix.maxnz + j]);
         }
         printf("\n");
     }
@@ -422,7 +430,7 @@ void print_ellpack_matrix_market(ellpack_matrix matrix) {
 
     for (int i = 0; i < matrix.M; i++) {    
         for(int j = 0; j < matrix.maxnz; j++) {
-            printf("%d %d %lg\n", i+1, matrix.ja[i][j]+1, matrix.as[i][j]);
+            printf("%d %d %lg\n", i+1, matrix.ja[i*matrix.maxnz + j]+1, matrix.as[i*matrix.maxnz + j]);
         }
     }
 

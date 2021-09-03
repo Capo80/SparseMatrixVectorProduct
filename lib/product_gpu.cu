@@ -16,6 +16,9 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
    }
 }
 
+// ######################################## csr ############################################
+
+/*
 template <unsigned int THD> __global__ void product_one_row_one_block_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
 
    //block sum
@@ -66,8 +69,8 @@ template <unsigned int THD> __global__ void product_one_row_one_block_csr(int M,
    }
 
 }
-
-__global__ void product_one_row_one_warp_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
+*/
+__global__ void product_one_row_one_warp_csr(unsigned int M, unsigned int* __restrict__ irp, unsigned int* __restrict__ ja, double*  __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
 
    __shared__ double warp_sum[BLOCK_SIZE];
 
@@ -76,7 +79,6 @@ __global__ void product_one_row_one_warp_csr(int M, int* irp, int* ja, double* a
    int warp_id = tid % WARP_SIZE;
    int row = tid / WARP_SIZE;
    int i;
-   //printf("%d\n", tid);
 
    warp_sum[b_tid] = 0;
    if (row < M) {
@@ -92,7 +94,7 @@ __global__ void product_one_row_one_warp_csr(int M, int* irp, int* ja, double* a
       
       __syncwarp();
 
-      //no need to sync we have only one warp
+      // we have only one warp, no need to sync entire block
       if (warp_id < 16) { warp_sum[b_tid] += warp_sum[b_tid + 16]; __syncwarp();}
       
       if (warp_id < 8) { warp_sum[b_tid] += warp_sum[b_tid + 8]; __syncwarp();}
@@ -112,7 +114,65 @@ __global__ void product_one_row_one_warp_csr(int M, int* irp, int* ja, double* a
 
 
 }
+/*
+template <unsigned int N> __global__ void product_one_row_N_warp_csr(unsigned int M, unsigned int* __restrict__ irp, unsigned int* __restrict__ ja, double*  __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
 
+   __shared__ double warp_sum[BLOCK_SIZE];
+
+   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+   int b_tid = threadIdx.x;
+   int warp_id = tid % (WARP_SIZE*2);
+   int row = tid / (WARP_SIZE*N);
+   int i;
+
+   warp_sum[b_tid] = 0;
+   if (row < M) {
+
+      // warp sums row
+      int limit = irp[row+1];
+      double sum = 0;
+      for (i = irp[row] + warp_id; i < limit; i += WARP_SIZE) {
+         sum += as[i] * array[ja[i]];
+      }
+
+      warp_sum[b_tid] = sum;
+      
+      __syncthreads();
+
+      //block reduction (max efficency)
+      if (N >= 32) { if (tid < 512) { warp_sum[b_tid] += warp_sum[b_tid + 512]; } __syncthreads(); }
+
+      if (N >= 16) { if (tid < 256) { warp_sum[b_tid] += warp_sum[b_tid + 256]; } __syncthreads(); }
+
+      if (N >= 8) { if (tid < 128) { warp_sum[b_tid] += warp_sum[b_tid + 128]; } __syncthreads(); }
+
+      if (N >= 4) { if (tid < 64) { warp_sum[b_tid] += warp_sum[b_tid + 64]; } __syncthreads(); }
+
+      if (N >= 2) { if (tid < 32) { warp_sum[b_tid] += warp_sum[b_tid + 32]; } __syncthreads(); }
+
+
+      // we have only one warp, no need to sync entire block
+      if (warp_id < 16) { warp_sum[b_tid] += warp_sum[b_tid + 16]; __syncwarp();}
+      
+      if (warp_id < 8) { warp_sum[b_tid] += warp_sum[b_tid + 8]; __syncwarp();}
+
+      if (warp_id < 4) { warp_sum[b_tid] += warp_sum[b_tid + 4]; __syncwarp();}
+      
+      if (warp_id < 2) { warp_sum[b_tid] += warp_sum[b_tid + 2]; __syncwarp();}
+      
+      if (warp_id < 1) { warp_sum[b_tid] += warp_sum[b_tid + 1]; __syncwarp();}
+      
+      //reduction over, save result in final array
+      if (warp_id == 0) {
+         result[row] = warp_sum[b_tid];
+      }
+
+   }
+
+
+} */
+
+/*
 __global__ void product_one_row_one_thread_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
 
    int tid = threadIdx.x + blockDim.x * blockIdx.x;
@@ -156,13 +216,13 @@ template <unsigned int N> __global__ void product_N_row_one_thread_csr(int M, in
    }
 
 }
-
+*/
 
 extern "C"
 float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
 
-   int* irp_gpu;
-   int* ja_gpu;
+   unsigned int* irp_gpu;
+   unsigned int* ja_gpu;
    double* as_gpu;
    double* array_gpu;
    double* result_gpu;
@@ -179,21 +239,11 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
    gpuErrchk( cudaMemcpy(ja_gpu, matrix->ja, sizeof(int)*matrix->nz, cudaMemcpyHostToDevice) );
    gpuErrchk( cudaMemcpy(as_gpu, matrix->as, sizeof(double)*matrix->nz, cudaMemcpyHostToDevice) );
    gpuErrchk( cudaMemcpy(array_gpu, array, sizeof(double)*matrix->M, cudaMemcpyHostToDevice) );
-   gpuErrchk( cudaMemcpy(result_gpu, matrix, sizeof(double)*matrix->M, cudaMemcpyHostToDevice) );
    
    //set up timer
    cudaEvent_t start, stop;
    gpuErrchk( cudaEventCreate(&start) );
    gpuErrchk( cudaEventCreate(&stop) );
-
-/*   if (WARP_SIZE*matrix->M >= BLOCK_SIZE || 1) {
-      //product_N_row_one_thread_csr<2><<<matrix->M / 2 / 1024 + 1, BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);
-      //product_one_row_one_thread_csr<<<matrix->M / 1024 + 1, BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);
-      //product_one_row_one_block_csr<BLOCK_SIZE><<<matrix->M, BLOCK_SIZE, sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);
-      //product_one_row_one_warp_csr<<<10, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
-   } else {
-      product_one_row_one_warp_csr<<<1, matrix->M*WARP_SIZE, sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
-   }*/
 
    gpuErrchk( cudaEventRecord(start, 0) );
    product_one_row_one_warp_csr<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE + 1, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
@@ -201,9 +251,11 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
 
    gpuErrchk( cudaEventSynchronize(stop) );
 
+   //calculate time of computation (in ms)
    float time;
    gpuErrchk( cudaEventElapsedTime(&time, start, stop) );
    
+   //copy result back from gpu
    gpuErrchk( cudaMemcpy(result, result_gpu, sizeof(double)*matrix->M, cudaMemcpyDeviceToHost) );
    
    //free everything
@@ -219,10 +271,98 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
 
 }
 
+// ################################ ellpack #########################################
+
+__global__ void product_one_row_one_warp_ellpack(unsigned int M, unsigned int maxnz, unsigned int* __restrict__ ja, double* __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
+
+   __shared__ double warp_sum[BLOCK_SIZE];
+
+   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+   int b_tid = threadIdx.x;
+   int warp_id = tid % WARP_SIZE;
+   unsigned int row = tid / WARP_SIZE;
+   int i;
+
+   warp_sum[b_tid] = 0;
+   if (row < M) {
+
+      // warp sums row
+      double sum = 0;
+      int index = row*maxnz;
+      for (i = warp_id; i < maxnz; i += WARP_SIZE) {
+         sum += as[index + i] * array[ja[index + i]];
+      }
+
+      warp_sum[b_tid] = sum;
+      
+      __syncwarp();
+
+      // we have only one warp, no need to sync entire block
+      if (warp_id < 16) { warp_sum[b_tid] += warp_sum[b_tid + 16]; __syncwarp();}
+      
+      if (warp_id < 8) { warp_sum[b_tid] += warp_sum[b_tid + 8]; __syncwarp();}
+
+      if (warp_id < 4) { warp_sum[b_tid] += warp_sum[b_tid + 4]; __syncwarp();}
+      
+      if (warp_id < 2) { warp_sum[b_tid] += warp_sum[b_tid + 2]; __syncwarp();}
+      
+      if (warp_id < 1) { warp_sum[b_tid] += warp_sum[b_tid + 1]; __syncwarp();}
+      
+      //reduction over, save result in final array
+      if (warp_id == 0) {
+         result[row] = warp_sum[b_tid];
+      }
+
+   }
+
+
+}
 
 extern "C"
-double cuda_product_ellpack(ellpack_matrix* matrix, double* array, double* result) {
+float cuda_product_ellpack(ellpack_matrix* matrix, double* array, double* result) {
 
-	return 0.0;
+   unsigned int* ja_gpu;
+   double* as_gpu;
+   double* array_gpu;
+   double* result_gpu;
+
+   //alloc arguments
+   gpuErrchk( cudaMalloc((void**) &ja_gpu, (unsigned long)sizeof(unsigned int)*matrix->M*matrix->maxnz) );
+   gpuErrchk( cudaMalloc((void**) &as_gpu, (unsigned long)sizeof(double)*matrix->M*matrix->maxnz) );
+   gpuErrchk( cudaMalloc((void**) &array_gpu, sizeof(double)*matrix->M) );
+   gpuErrchk( cudaMalloc((void**) &result_gpu, sizeof(double)*matrix->M) );
+
+   //copy arguments
+   gpuErrchk( cudaMemcpy(ja_gpu, matrix->ja, (unsigned long) sizeof(int)*matrix->M*matrix->maxnz, cudaMemcpyHostToDevice) );
+   gpuErrchk( cudaMemcpy(as_gpu, matrix->as, (unsigned long) sizeof(double)*matrix->M*matrix->maxnz, cudaMemcpyHostToDevice) );
+   gpuErrchk( cudaMemcpy(array_gpu, array, sizeof(double)*matrix->M, cudaMemcpyHostToDevice) );
+   
+   //set up timer
+   cudaEvent_t start, stop;
+   gpuErrchk( cudaEventCreate(&start) );
+   gpuErrchk( cudaEventCreate(&stop) );
+
+   gpuErrchk( cudaEventRecord(start, 0) );
+   product_one_row_one_warp_ellpack<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE + 1, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, matrix->maxnz, ja_gpu, as_gpu, array_gpu, result_gpu);      
+   gpuErrchk( cudaEventRecord(stop, 0) );
+
+   gpuErrchk( cudaEventSynchronize(stop) );
+
+   //calculate time of computation (in ms)
+   float time;
+   gpuErrchk( cudaEventElapsedTime(&time, start, stop) );
+   
+   //copy result back from gpu
+   gpuErrchk( cudaMemcpy(result, result_gpu, sizeof(double)*matrix->M, cudaMemcpyDeviceToHost) );
+   
+   //free everything
+   gpuErrchk( cudaFree(ja_gpu) );
+   gpuErrchk( cudaFree(as_gpu) );
+   gpuErrchk( cudaFree(result_gpu) );
+   gpuErrchk( cudaFree(array_gpu) );
+   gpuErrchk( cudaEventDestroy(start) );
+   gpuErrchk( cudaEventDestroy(stop) );
+
+	return time;
 
 }
