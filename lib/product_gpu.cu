@@ -172,30 +172,31 @@ template <unsigned int N> __global__ void product_one_row_N_warp_csr(unsigned in
 
 } */
 
-/*
-__global__ void product_one_row_one_thread_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
+
+__global__ void product_one_row_one_thread_csr(unsigned int M, unsigned int* __restrict__ irp, unsigned int* __restrict__ ja, double*  __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
 
    int tid = threadIdx.x + blockDim.x * blockIdx.x;
-   int row = tid;
-   int i;
+   int i, j;
    //printf("%d\n", tid);
-
-   if (row < M) {
-
-      // warp sums row
-      int limit = irp[row+1];
+   
+   //grid-stride
+   for(i = tid; i < M; i += blockDim.x*gridDim.x) {
+   
+      // thread sums row
+      int limit = irp[i+1];
+      int start = irp[i];
       double sum = 0;
-      for (i = irp[row]; i < limit; i += 1) {
-         sum += as[i] * array[ja[i]];
+      for (j = start; j < limit; j += 1) {
+         sum += as[j] * array[ja[j]];
       }
 
-      result[row] = sum;
-      
+      result[i] = sum;
    }
+   
 
 
 }
-
+/*
 template <unsigned int N> __global__ void product_N_row_one_thread_csr(int M, int* irp, int* ja, double* as, double* array, double* result) {
 
    int tid = threadIdx.x + blockDim.x * blockIdx.x;
@@ -245,8 +246,12 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
    gpuErrchk( cudaEventCreate(&start) );
    gpuErrchk( cudaEventCreate(&stop) );
 
+   //find nuber of SMs
+   int numSMs;
+   cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
+
    gpuErrchk( cudaEventRecord(start, 0) );
-   product_one_row_one_warp_csr<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE + 1, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
+   product_one_row_one_thread_csr<<<numSMs, BLOCK_SIZE>>>(matrix->M, irp_gpu, ja_gpu, as_gpu, array_gpu, result_gpu);      
    gpuErrchk( cudaEventRecord(stop, 0) );
 
    gpuErrchk( cudaEventSynchronize(stop) );
@@ -316,6 +321,28 @@ __global__ void product_one_row_one_warp_ellpack(unsigned int M, unsigned int ma
    }
 
 
+} 
+
+__global__ void product_one_row_one_thread_ellpack(unsigned int M, unsigned int maxnz, unsigned int* __restrict__ ja, double*  __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
+
+   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+   int i, j;
+   //printf("%d\n", tid);
+
+   //grid-stride
+   for(i = tid; i < M; i += blockDim.x*gridDim.x) {
+   
+      // thread sums row
+      double sum = 0;
+      int index = i*maxnz;
+      for (j = 0; j < maxnz; j += 1) {
+         sum += as[index+j] * array[ja[index+j]];
+      }
+
+      result[i] = sum;
+   }
+
+
 }
 
 extern "C"
@@ -342,8 +369,12 @@ float cuda_product_ellpack(ellpack_matrix* matrix, double* array, double* result
    gpuErrchk( cudaEventCreate(&start) );
    gpuErrchk( cudaEventCreate(&stop) );
 
+   //find nuber of SMs
+   int numSMs;
+   cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
+
    gpuErrchk( cudaEventRecord(start, 0) );
-   product_one_row_one_warp_ellpack<<<(matrix->M*WARP_SIZE) / BLOCK_SIZE + 1, BLOCK_SIZE , sizeof(double)*BLOCK_SIZE>>>(matrix->M, matrix->maxnz, ja_gpu, as_gpu, array_gpu, result_gpu);      
+   product_one_row_one_thread_ellpack<<<numSMs, BLOCK_SIZE>>>(matrix->M, matrix->maxnz, ja_gpu, as_gpu, array_gpu, result_gpu);      
    gpuErrchk( cudaEventRecord(stop, 0) );
 
    gpuErrchk( cudaEventSynchronize(stop) );
@@ -366,3 +397,4 @@ float cuda_product_ellpack(ellpack_matrix* matrix, double* array, double* result
 	return time;
 
 }
+

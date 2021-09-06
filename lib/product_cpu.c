@@ -67,7 +67,7 @@ double omp_product_csr(csr_matrix* matrix, double* array, double* result) {
 	for (i = 0; i < M; i++) {
         sum = 0;
         limit = irp[i+1];
-		for (j = irp[i]; j < limit; j+=2) 
+		for (j = irp[i]; j < limit; j++) 
 			sum += as[j]*array[ja[j]];
 
 		result[i] = sum;
