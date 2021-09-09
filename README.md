@@ -1,31 +1,18 @@
 # SparseMatrixVectorProduct
-An efficent parallelized code for SpMV for openmp and CUDA, a project for SCPA course
+An efficent parallelized code for SpMV for openmp and CUDA, a project for the SCPA course
 
-## Notes
+## Usage
 
-tried csr
-- dynamic 1
-- dynamic 100
-- static
-in this order on csv, static is better
+The module has been build for Compute Capability 7.5 and it is compiled only for that architecture, there is a high probability that the code will not work on any other.
 
-possible improvements
-- make ellpack ja & as a real matrix OK
-- loop unroll NOPE
-- pull the arrays out of the structure to save one memory read per cycle OK
-- make thread stop faster for ellpack? BAD
-- use double2 in cuda NOPE
+To compile the code run "make" in the root directory of the project.
 
-### GPU
+Before running the code add a "matrices" folder in the root directory of the project and put inside all the matrices to multiply. Then run the "fill_csv" to fill the head of the csv file that will contain the results.
 
-c'è una reduction su ogni riga, le righe tra di loro sono indipendenti
+```
+ATTENTION! The matrices must saved be in MatrixMarket format and ordered by COLUMN! The code will not work otherwise.
+```
 
-idea? mantenere riga all'interno di un solo blocco? evitare problematiche di reduction intra-blocco
+To test the correctness of the result use the "correctness" binary, to time the speed of the code use the "time" binary.
 
-possibilità
-- una riga per blocco NO, troppi blocchi
-- più righe in un blocco (ragionare in warp?)
-
-- una riga per warp
-- più righe per warp NO, righe sono sufficentemente grandi per occupare un warp da sole
-- una riga per più warp
+Both binaries will ask about the format to save the matrix in and the type of product to execute. 
