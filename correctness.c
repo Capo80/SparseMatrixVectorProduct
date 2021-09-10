@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
                 if (max_relative_error < relative_error)
                     max_relative_error = relative_error;
                 if (relative_error > 10E-8) {
-                    printf("cuda: %lg %lg %lg %d\n", relative_error, result_serial[i], result_cuda[i], i);
+                    //printf("cuda: %lg %lg %lg %d\n", relative_error, result_serial[i], result_cuda[i], i);
                     correct = 0;                   
                 }
                 relative_error = fabs(result_serial[i] - result_omp[i]) / fabs(result_serial[i]);

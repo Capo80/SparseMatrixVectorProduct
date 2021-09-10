@@ -177,7 +177,6 @@ __global__ void product_one_row_one_thread_csr(unsigned int M, unsigned int* __r
 
    int tid = threadIdx.x + blockDim.x * blockIdx.x;
    int i, j;
-   //printf("%d\n", tid);
    
    //grid-stride
    for(i = tid; i < M; i += blockDim.x*gridDim.x) {
@@ -278,56 +277,12 @@ float cuda_product_csr(csr_matrix* matrix, double* array, double* result) {
 
 // ################################ ellpack #########################################
 
-__global__ void product_one_row_one_warp_ellpack(unsigned int M, unsigned int maxnz, unsigned int* __restrict__ ja, double* __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
 
-   __shared__ double warp_sum[BLOCK_SIZE];
-
-   int tid = threadIdx.x + blockDim.x * blockIdx.x;
-   int b_tid = threadIdx.x;
-   int warp_id = tid % WARP_SIZE;
-   unsigned int row = tid / WARP_SIZE;
-   int i;
-
-   warp_sum[b_tid] = 0;
-   if (row < M) {
-
-      // warp sums row
-      double sum = 0;
-      int index = row*maxnz;
-      for (i = warp_id; i < maxnz; i += WARP_SIZE) {
-         sum += as[index + i] * array[ja[index + i]];
-      }
-
-      warp_sum[b_tid] = sum;
-      
-      __syncwarp();
-
-      // we have only one warp, no need to sync entire block
-      if (warp_id < 16) { warp_sum[b_tid] += warp_sum[b_tid + 16]; __syncwarp();}
-      
-      if (warp_id < 8) { warp_sum[b_tid] += warp_sum[b_tid + 8]; __syncwarp();}
-
-      if (warp_id < 4) { warp_sum[b_tid] += warp_sum[b_tid + 4]; __syncwarp();}
-      
-      if (warp_id < 2) { warp_sum[b_tid] += warp_sum[b_tid + 2]; __syncwarp();}
-      
-      if (warp_id < 1) { warp_sum[b_tid] += warp_sum[b_tid + 1]; __syncwarp();}
-      
-      //reduction over, save result in final array
-      if (warp_id == 0) {
-         result[row] = warp_sum[b_tid];
-      }
-
-   }
-
-
-} 
 
 __global__ void product_one_row_one_thread_ellpack(unsigned int M, unsigned int maxnz, unsigned int* __restrict__ ja, double*  __restrict__ as, double* __restrict__ array, double* __restrict__ result) {
 
    int tid = threadIdx.x + blockDim.x * blockIdx.x;
    int i, j;
-   //printf("%d\n", tid);
 
    //grid-stride
    for(i = tid; i < M; i += blockDim.x*gridDim.x) {
